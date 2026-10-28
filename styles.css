@@ -1,0 +1,65 @@
+:root {
+  color-scheme: dark;
+  --ink: #f6efe3;
+  --muted: #b8aa95;
+  --gold: #cbb27c;
+  --gold-soft: rgba(203, 178, 124, 0.34);
+  --bg: #17130f;
+  --line: rgba(203, 178, 124, 0.22);
+}
+
+* { box-sizing: border-box; }
+html { min-width: 320px; background: var(--bg); }
+
+body {
+  min-height: 100vh;
+  margin: 0;
+  background: radial-gradient(circle at 50% -20%, rgba(203, 178, 124, 0.1), transparent 42%), var(--bg);
+  color: var(--ink);
+  font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  line-height: 1.6;
+}
+
+.shell { display: grid; min-height: 100vh; place-items: center; padding: 24px; }
+
+.card {
+  width: min(100%, 440px);
+  padding: clamp(28px, 7vw, 48px);
+  border: 1px solid var(--line);
+  background: rgba(33, 27, 21, 0.92);
+  box-shadow: 0 22px 70px rgba(0, 0, 0, 0.22);
+}
+
+.eyebrow { margin: 0 0 18px; color: var(--gold); font-size: 0.68rem; letter-spacing: 0.18em; }
+h1 { margin: 0; font-family: Georgia, "Times New Roman", serif; font-size: clamp(2rem, 8vw, 2.75rem); font-weight: 400; line-height: 1.15; }
+.intro { margin: 20px 0 32px; color: var(--muted); font-size: 0.95rem; }
+label { display: block; margin-bottom: 8px; color: var(--muted); font-size: 0.82rem; }
+.input-row { display: flex; gap: 10px; }
+
+input, button {
+  min-height: 46px;
+  border: 1px solid var(--gold-soft);
+  border-radius: 0;
+  font: inherit;
+}
+
+input { min-width: 0; flex: 1; padding: 0 13px; background: #17130f; color: var(--ink); }
+button { padding: 0 18px; background: var(--gold); color: #211b15; cursor: pointer; font-weight: 600; }
+button:hover { background: #ddc894; }
+button#lock { margin-top: 28px; background: transparent; color: var(--gold); }
+button#lock:hover { background: rgba(203, 178, 124, 0.08); }
+input:focus-visible, button:focus-visible { outline: 2px solid var(--gold); outline-offset: 3px; }
+#status { min-height: 1.6em; margin: 12px 0 0; color: var(--muted); font-size: 0.85rem; }
+[hidden] { display: none !important; }
+.address { overflow-wrap: anywhere; color: var(--muted); font-size: 0.85rem; }
+
+@media (max-width: 420px) {
+  .shell { padding: 14px; }
+  .card { padding: 26px 22px; }
+  .input-row { display: grid; }
+  button { width: 100%; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { scroll-behavior: auto !important; transition-duration: 0.01ms !important; }
+}
