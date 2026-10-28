@@ -62,13 +62,17 @@ form.addEventListener('submit',async event=>{
       let blob=new Blob(chunks);
       if(asset.encoding==='gzip') blob=await new Response(blob.stream().pipeThrough(new DecompressionStream('gzip'))).blob();
       if(blob.size!==asset.size || active!==generation) throw new Error('素材读取中断');
+      if(asset.type==='text/javascript') {
+        const source=(await blob.text()).replace(/(from\s+)(['"])(\.\/[^'"]+)\2/g,(_,prefix,quote,path)=>prefix+quote+cached(new URL(path,new URL(name,base)).href)+quote);
+        blob=new Blob([source],{type:asset.type});
+      }
       const url=URL.createObjectURL(new Blob([blob],{type:asset.type}));urls.set(name,url);return url;
     };
     window.lizAssets=Object.freeze({cached,get,release(path){const name=logical(path);if(name.endsWith('.glb')){URL.revokeObjectURL(urls.get(name));urls.delete(name);}}});
-    // ponytail: textures and three small modules first; the two GLBs load in sequence inside the renderer.
-    for(const name of Object.keys(app.assets)) if(!name.endsWith('.glb')) await get(name);
+    // ponytail: prepare resources in dependency order so the native workbench can use blob URLs directly.
+    for(const name of Object.keys(app.assets)) await get(name);
     let html=app.html.replaceAll('__PAGE_BASE__',base.href);
-    for(const [token,path] of [['__RIG_MODULE__','rig-submit.js'],['__PERFORMANCE_MODULE__','performance.mjs'],['__BREATHING_MODULE__','breathing.mjs']]) html=html.replaceAll(token,cached(path));
+    for(const [token,path] of [['__RIG_MODULE__','rig-submit.js'],['__PERFORMANCE_MODULE__','performance.mjs'],['__BREATHING_MODULE__','breathing.mjs'],['__DIALOGUE_CSS__','dialogue.css']]) html=html.replaceAll(token,cached(path));
     const frame=document.createElement('iframe');frame.title='数字人美术预览';
     frame.setAttribute('sandbox','allow-scripts allow-same-origin allow-downloads');
     frame.srcdoc=html;content.replaceChildren(frame);
