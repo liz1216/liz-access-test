@@ -5,8 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="theme-color" content="#17130f">
     <title>LIZ · 美术预览</title>
-    <link rel="stylesheet" href="./styles.css?v=b03070e211f8">
-    <script type="module" src="./unlock.js?v=c054204eacbf"></script>
+    <link rel="stylesheet" href="./styles.css?v=d06f6c242cd1">
+    <script type="module" src="./unlock.js?v=5f5f7ab3a0c1"></script>
   </head>
   <body>
     <main class="shell">
@@ -26,6 +26,10 @@
 
       <section id="unlocked" class="card" hidden>
         <div id="content"></div>
+        <div id="load-progress" role="status" aria-live="polite" hidden>
+          <span id="load-message">正在准备工作台…</span>
+          <progress id="asset-progress" max="100" value="0" aria-label="素材下载进度"></progress>
+        </div>
         <button id="lock" type="button">重新锁定</button>
       </section>
     </main>
