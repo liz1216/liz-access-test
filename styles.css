@@ -52,6 +52,11 @@ input:focus-visible, button:focus-visible { outline: 2px solid var(--gold); outl
 #status { min-height: 1.6em; margin: 12px 0 0; color: var(--muted); font-size: 0.85rem; }
 [hidden] { display: none !important; }
 .address { overflow-wrap: anywhere; color: var(--muted); font-size: 0.85rem; }
+.runtime { overflow: hidden; }
+.runtime .shell { display: block; padding: 0; }
+.runtime #unlocked { width: 100%; height: 100dvh; padding: 0; border: 0; box-shadow: none; }
+.runtime #lock { display: none; }
+.runtime #content, .runtime iframe { display: block; width: 100%; height: 100%; margin: 0; padding: 0; border: 0; }
 
 @media (max-width: 420px) {
   .shell { padding: 14px; }
