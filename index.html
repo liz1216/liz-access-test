@@ -6,7 +6,7 @@
     <meta name="theme-color" content="#17130f">
     <title>LIZ · 美术预览</title>
     <link rel="stylesheet" href="./styles.css?v=d06f6c242cd1">
-    <script type="module" src="./unlock.js?v=5f5f7ab3a0c1"></script>
+    <script type="module" src="./unlock.js?v=8728af384176"></script>
   </head>
   <body>
     <main class="shell">
@@ -33,5 +33,11 @@
         <button id="lock" type="button">重新锁定</button>
       </section>
     </main>
+    <script>
+      if (!window.HTMLScriptElement || !HTMLScriptElement.supports || !HTMLScriptElement.supports('importmap') || !window.crypto || !window.crypto.subtle || !window.DecompressionStream || !window.WebGL2RenderingContext) {
+        document.getElementById('status').textContent = '此浏览器不支持工作台，请通过 HTTPS 使用新版 Chrome 或 Edge（不支持 IE）。';
+        document.getElementById('unlock').disabled = true;
+      }
+    </script>
   </body>
 </html>

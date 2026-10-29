@@ -4,11 +4,11 @@ const gate=document.getElementById('gate'),unlocked=document.getElementById('unl
 const content=document.getElementById('content'),lock=document.getElementById('lock');
 const loading=document.getElementById('load-progress'),loadMessage=document.getElementById('load-message'),bar=document.getElementById('asset-progress');
 const bytes=value=>Uint8Array.from(atob(value),char=>char.charCodeAt(0));
-const urls=new Map();let generation=0,assetAbort;
+const urls=new Map();let generation=0,assetAbort,cancelActiveTransfers;
 const base=new URL('.',location.href);
 const logical=path=>decodeURIComponent(new URL(path,base).pathname.slice(base.pathname.length));
 function clear(){
-  generation++;assetAbort?.abort();content.replaceChildren();delete window.lizAssets;
+  generation++;cancelActiveTransfers?.();cancelActiveTransfers=null;assetAbort?.abort();assetAbort=null;content.replaceChildren();delete window.lizAssets;
   for(const url of urls.values()) URL.revokeObjectURL(url);
   urls.clear();document.body.classList.remove('runtime');unlocked.hidden=true;gate.hidden=false;
   password.value='';loading.hidden=true;bar.value=0;
@@ -32,8 +32,14 @@ form.addEventListener('submit',async event=>{
     password.value='';
     const app=JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(raw));
     if(app.format!=='liz-art-app' || app.version!==1 || !app.assets || typeof app.html!=='string') throw new Error('预览版本无效');
-    let complete=false,assetsPending=true,lastReport=0,running=0;
+    let complete=false,lastReport=0,running=0;
     const waiting=[],requests=new Map(),parts=new Map(),received=new Map();
+    const IDLE_TIMEOUT=45000;
+    const locked=()=>active!==generation || controller.signal.aborted;
+    const lockedError=()=>new Error('页面已锁定');
+    const drainWaiting=error=>{while(waiting.length) waiting.shift().reject(error);};
+    const cancelTransfers=()=>drainWaiting(lockedError());
+    cancelActiveTransfers=cancelTransfers;
     const total=new Map(Object.values(app.assets).flatMap(asset=>asset.parts).map(part=>[part.url,part.size]));
     const totalBytes=[...total.values()].reduce((sum,size)=>sum+size,0);
     const progress=(force=false)=>{
@@ -46,31 +52,78 @@ form.addEventListener('submit',async event=>{
     };
     const fail=error=>{
       if(active!==generation) return;
-      clear();status.textContent=error.message || '加载失败，请刷新重试';password.focus();
+      const message=error?.message || '加载失败，请刷新重试';
+      if(complete){status.textContent=loadMessage.textContent=message;loading.hidden=false;return;}
+      clear();status.textContent=message;password.focus();
     };
+    async function acquireSlot(){
+      if(locked()) throw lockedError();
+      if(running<4){running++;return;}
+      await new Promise((resolve,reject)=>waiting.push({resolve:()=>{running++;resolve();},reject}));
+      if(locked()){releaseSlot();throw lockedError();}
+    }
+    function releaseSlot(){
+      running=Math.max(0,running-1);
+      const waiter=waiting.shift();
+      if(waiter) waiter.resolve();
+    }
+    async function fetchPart(part,cacheMode){
+      if(locked()) throw lockedError();
+      const attempt=new AbortController();
+      let reader=null,timer=0,timedOut=false;
+      const abort=()=>attempt.abort();
+      const arm=()=>{clearTimeout(timer);timer=setTimeout(()=>{timedOut=true;attempt.abort();},IDLE_TIMEOUT);};
+      controller.signal.addEventListener('abort',abort,{once:true});
+      try {
+        received.delete(part.url);arm();
+        const response=await fetch(new URL(part.url,base),{cache:cacheMode,signal:attempt.signal});
+        clearTimeout(timer);
+        if(!response.ok) throw new Error('素材读取失败，请刷新后重试');
+        if(!response.body) throw new Error('素材响应为空，请刷新后重试');
+        reader=response.body.getReader();
+        const data=new Uint8Array(part.size);let offset=0;
+        while(true){
+          arm();
+          let result;
+          try {result=await reader.read();} finally {clearTimeout(timer);}
+          const {done,value}=result;if(done) break;
+          if(offset+value.length>data.length) throw new Error('素材大小异常');
+          data.set(value,offset);offset+=value.length;received.set(part.url,offset);progress();
+        }
+        if(offset!==part.size) throw new Error('素材下载不完整，请刷新重试');
+        progress(true);
+        return await crypto.subtle.decrypt({name:'AES-GCM',iv:bytes(part.iv)},key,data);
+      } catch(error){
+        if(locked()) throw lockedError();
+        if(timedOut) throw new Error('素材读取超时，请刷新重试');
+        throw error;
+      } finally {
+        clearTimeout(timer);controller.signal.removeEventListener('abort',abort);
+        try {await reader?.cancel?.();} catch (_) {}
+        try {reader?.releaseLock?.();} catch (_) {}
+      }
+    }
     async function download(part){
       if(parts.has(part.url)) return parts.get(part.url);
+      if(!/^encrypted\/[a-f0-9]{64}\.bin$/.test(part.url) || bytes(part.iv).length!==12) throw new Error('素材记录无效');
       const promise=(async()=>{
-        // ponytail: four requests bound memory and connection pressure for 16 MB blocks.
-        if(running<4) running++;else await new Promise(resolve=>waiting.push(resolve));
+        let acquired=false;
         try {
-          if(active!==generation) throw new Error('页面已锁定');
-          if(!/^encrypted\/[a-f0-9]{64}\.bin$/.test(part.url) || bytes(part.iv).length!==12) throw new Error('素材记录无效');
-          const response=await fetch(new URL(part.url,base),{cache:'force-cache',signal:controller.signal});
-          if(!response.ok) throw new Error('素材读取失败，请刷新后重试');
-          const data=new Uint8Array(part.size);let offset=0;
-          const reader=response.body.getReader();
-          while(true){
-            const {done,value}=await reader.read();if(done) break;
-            if(offset+value.length>data.length) throw new Error('素材大小异常');
-            data.set(value,offset);offset+=value.length;received.set(part.url,offset);progress();
+          await acquireSlot();acquired=true;
+          let failure;
+          for(const cacheMode of ['force-cache','reload']){
+            try {return await fetchPart(part,cacheMode);}
+            catch(error){
+              if(locked()) throw error;
+              failure=error;
+            }
           }
-          if(offset!==part.size) throw new Error('素材下载不完整，请刷新重试');
-          progress(true);
-          return await crypto.subtle.decrypt({name:'AES-GCM',iv:bytes(part.iv)},key,data);
-        } finally {if(waiting.length) waiting.shift()();else running--;}
+          throw failure || new Error('素材读取失败，请刷新后重试');
+        } finally {if(acquired) releaseSlot();}
       })();
-      parts.set(part.url,promise);return promise;
+      parts.set(part.url,promise);
+      promise.catch(()=>{if(parts.get(part.url)===promise) parts.delete(part.url);});
+      return promise;
     }
     const cached=path=>{
       if(/^(blob:|data:)/.test(path)) return path;
@@ -85,10 +138,17 @@ form.addEventListener('submit',async event=>{
       if(requests.has(name)) return requests.get(name);
       const promise=(async()=>{
         const asset=app.assets[name];if(!asset) throw new Error('未知预览素材');
-        const chunks=[];
-        for(const part of asset.parts) chunks.push(await download(part));
-        let blob=new Blob(chunks);
-        if(asset.encoding==='gzip') blob=await new Response(blob.stream().pipeThrough(new DecompressionStream('gzip'))).blob();
+        // ponytail: consume one block at a time; retaining all decrypted buffers doubles model memory.
+        let index=0;
+        let stream=new ReadableStream({async pull(streamController){
+          if(index===asset.parts.length){streamController.close();return;}
+          const part=asset.parts[index++];
+          try {streamController.enqueue(new Uint8Array(await download(part)));}
+          catch(error){streamController.error(error);}
+          finally {parts.delete(part.url);}
+        }});
+        if(asset.encoding==='gzip') stream=stream.pipeThrough(new DecompressionStream('gzip'));
+        let blob=await new Response(stream).blob();
         if(blob.size!==asset.size || active!==generation) throw new Error('素材读取中断');
         if(asset.type==='text/javascript') {
           const source=(await blob.text()).replace(/(from\s+)(['"])(\.\/[^'"]+)\2/g,(_,prefix,quote,path)=>prefix+quote+cached(new URL(path,new URL(name,base)).href)+quote);
@@ -97,7 +157,9 @@ form.addEventListener('submit',async event=>{
         if(active!==generation) throw new Error('页面已锁定');
         const url=URL.createObjectURL(new Blob([blob],{type:asset.type}));urls.set(name,url);return url;
       })();
-      requests.set(name,promise);return promise;
+      requests.set(name,promise);
+      promise.then(()=>requests.delete(name),error=>{requests.delete(name);fail(error);});
+      return promise;
     };
     const names=Object.keys(app.assets);
     const bootstrap=names.filter(name=>/\.(?:m?js|css|json)$/.test(name));
@@ -105,17 +167,23 @@ form.addEventListener('submit',async event=>{
     await Promise.all(bootstrap.filter(name=>name!=='art-workbench.mjs').map(get));
     await get('art-workbench.mjs');
     const assets=names.filter(name=>!bootstrap.includes(name));
-    const downloads=assets.map(name=>({name,promise:get(name)}));
-    const ready=Promise.all(downloads.filter(item=>!item.name.endsWith('.glb')).map(item=>item.promise)).catch(error=>{
+    // Models are requested by the renderer in parse order, so head and hair do not peak together.
+    const downloads=assets.filter(name=>!name.endsWith('.glb')).map(name=>get(name));
+    const ready=Promise.all(downloads).catch(error=>{
       if(active!==generation) return new Promise(()=>{});
       throw error;
     });
     ready.catch(()=>{});
-    window.lizAssets=Object.freeze({cached,get,ready,isDownloading:()=>assetsPending,
+    window.lizAssets=Object.freeze({cached,get,ready,fail,isDownloading:()=>running>0 || waiting.length>0,
       complete(){if(active!==generation) return;complete=true;loading.hidden=true;status.textContent='工作台已就绪';parts.clear();requests.clear();},
-      release(path){const name=logical(path);if(name.endsWith('.glb')){URL.revokeObjectURL(urls.get(name));urls.delete(name);requests.delete(name);}},
+      release(path){
+        if(typeof path!=='string' || /^(blob:|data:)/.test(path)) return;
+        const name=logical(path);if(!name.endsWith('.glb')) return;
+        const url=urls.get(name);if(url){URL.revokeObjectURL(url);urls.delete(name);}
+        requests.delete(name);for(const part of app.assets[name]?.parts || []) parts.delete(part.url);
+      },
     });
-    Promise.all(downloads.map(item=>item.promise)).then(()=>{assetsPending=false;progress(true);},fail);
+    ready.then(()=>progress(true),fail);
     let html=app.html.replaceAll('__PAGE_BASE__',base.href);
     for(const [token,path] of [['__RIG_MODULE__','rig-submit.js'],['__PERFORMANCE_MODULE__','performance.mjs'],['__BREATHING_MODULE__','breathing.mjs'],['__DIALOGUE_CSS__','dialogue.css'],['__ART_CSS__','art-workbench.css']]) html=html.replaceAll(token,cached(path));
     const frame=document.createElement('iframe');frame.title='数字人美术预览';
